@@ -72,15 +72,10 @@ command -v docker >/dev/null 2>&1 || die "未找到 docker 命令"
 # 容器内执行命令（非交互；stdin 接 /dev/null，避免 docker exec -i 等待 EOF 卡住）
 c_exec() { docker exec "$CONTAINER" bash -lc "$*" </dev/null; }
 
-# 容器内 TCP 连接测试：成功返回 0
-c_nc() { c_exec "nc -zv -w 3 $1 ${2:-}" >/dev/null 2>&1; }
-
-# 宿主机直接 TCP 连接测试
-h_nc() { nc -zv -w 3 "$1" "${2:-}" >/dev/null 2>&1; }
-
 port_open_from_container() { c_exec "nc -z -w 3 $1 ${2:-}" >/dev/null 2>&1; }
 port_open_from_host() { nc -z -w 3 "$1" "${2:-}" >/dev/null 2>&1; }
 
+# shellcheck disable=SC2329  # 由 trap 在退出时调用，shellcheck 看不到这层引用
 cleanup() {
     if [[ $USE_FIXTURE -eq 1 && $KEEP_FIXTURE -eq 0 ]]; then
         docker rm -f "$FIXTURE_NAME" >/dev/null 2>&1 || true
@@ -112,10 +107,18 @@ c_exec 'iptables -t nat -S KALI-RELAY' >/dev/null 2>&1 ||
 pass "容器 $CONTAINER 正在运行，规则链存在，目标 $TARGET"
 
 NETMODE=$(docker inspect --type container --format '{{.HostConfig.NetworkMode}}' "$CONTAINER")
-[[ "$NETMODE" != "host" ]] && pass "网络模式为 $NETMODE（非 host）" || fail "容器使用了 host 网络"
+if [[ "$NETMODE" != "host" ]]; then
+    pass "网络模式为 $NETMODE（非 host）"
+else
+    fail "容器使用了 host 网络"
+fi
 
 PORTS=$(docker port "$CONTAINER" 2>/dev/null)
-[[ -z "$PORTS" ]] && pass "未向宿主机发布任何端口" || fail "容器发布了端口: $PORTS"
+if [[ -z "$PORTS" ]]; then
+    pass "未向宿主机发布任何端口"
+else
+    fail "容器发布了端口: $PORTS"
+fi
 
 # 可选：起一个本地靶机 ---------------------------------------------------------
 if [[ $USE_FIXTURE -eq 1 ]]; then
@@ -166,16 +169,20 @@ fi
 
 if port_open_from_container 127.0.0.1 8080; then c2=open; else c2=closed; fi
 if port_open_from_host "$TARGET" 8080; then d2=open; else d2=closed; fi
-[[ "$c2" == "$d2" ]] &&
-    pass "127.0.0.1:8080 = $c2，$TARGET:8080 = $d2（一致）" ||
+if [[ "$c2" == "$d2" ]]; then
+    pass "127.0.0.1:8080 = $c2，$TARGET:8080 = $d2（一致）"
+else
     fail "127.0.0.1:8080 = $c2，$TARGET:8080 = $d2（不一致）"
+fi
 
 # 关闭端口的行为也要一致
 if port_open_from_container 127.0.0.1 9999; then c3=open; else c3=closed; fi
 if port_open_from_host "$TARGET" 9999; then d3=open; else d3=closed; fi
-[[ "$c3" == "$d3" ]] &&
-    pass "关闭端口 9999：127.0.0.1 = $c3，$TARGET = $d3（一致）" ||
+if [[ "$c3" == "$d3" ]]; then
+    pass "关闭端口 9999：127.0.0.1 = $c3，$TARGET = $d3（一致）"
+else
     fail "关闭端口 9999：127.0.0.1 = $c3，$TARGET = $d3（不一致）"
+fi
 
 # 2. TCP 多端口（nmap -sT）----------------------------------------------------
 log "2. TCP 多端口：nmap -sT"
@@ -188,9 +195,11 @@ OPEN_VIA_DIRECT=$(c_exec "nmap -sT -Pn -p $NMAP_PORTS --open $TARGET" |
 
 printf '           127.0.0.1 开放: %s\n' "${OPEN_VIA_LOCAL:-(无)}"
 printf '           %s 开放: %s\n' "$TARGET" "${OPEN_VIA_DIRECT:-(无)}"
-[[ "$OPEN_VIA_LOCAL" == "$OPEN_VIA_DIRECT" ]] &&
-    pass "nmap -sT 结果一致" ||
+if [[ "$OPEN_VIA_LOCAL" == "$OPEN_VIA_DIRECT" ]]; then
+    pass "nmap -sT 结果一致"
+else
     fail "nmap -sT 结果不一致"
+fi
 
 # 3. SYN 扫描 ------------------------------------------------------------------
 log "3. SYN 扫描：nmap -sS 127.0.0.1"
@@ -284,9 +293,11 @@ fi
 
 if c_exec 'grep -q "127.0.0.11" /etc/resolv.conf' 2>/dev/null; then
     pass "配置使用了 Docker 内置 DNS 127.0.0.11"
-    c_exec 'iptables -t nat -S KALI-RELAY' | grep -q '127.0.0.11' &&
-        pass "规则已对 127.0.0.11 放行（RETURN）" ||
+    if c_exec 'iptables -t nat -S KALI-RELAY' | grep -q '127.0.0.11'; then
+        pass "规则已对 127.0.0.11 放行（RETURN）"
+    else
         fail "规则未对 127.0.0.11 放行"
+    fi
 else
     skip "未使用 Docker 内置 DNS，跳过"
 fi
@@ -298,14 +309,24 @@ ok=1
 for i in 1 2 3; do
     c_exec "echo exec-$i-ok" >/dev/null 2>&1 || ok=0
 done
-[[ $ok -eq 1 ]] && pass "连续 3 次 docker exec 均正常" || fail "docker exec 出现失败"
+if [[ $ok -eq 1 ]]; then
+    pass "连续 3 次 docker exec 均正常"
+else
+    fail "docker exec 出现失败"
+fi
 
 STATE2=$(docker inspect --type container --format '{{.State.Status}}' "$CONTAINER")
-[[ "$STATE2" == "running" ]] && pass "容器保持运行（$STATE2）" || fail "容器状态异常（$STATE2）"
+if [[ "$STATE2" == "running" ]]; then
+    pass "容器保持运行（$STATE2）"
+else
+    fail "容器状态异常（$STATE2）"
+fi
 
-c_exec 'iptables -t nat -S KALI-RELAY' | grep -q -- "--to-destination $TARGET" &&
-    pass "DNAT 规则仍指向 $TARGET" ||
+if c_exec 'iptables -t nat -S KALI-RELAY' | grep -q -- "--to-destination $TARGET"; then
+    pass "DNAT 规则仍指向 $TARGET"
+else
     fail "DNAT 规则已失效"
+fi
 
 # 9. 规则与 conntrack 快照 ------------------------------------------------------
 log "9. 规则快照与 conntrack"
