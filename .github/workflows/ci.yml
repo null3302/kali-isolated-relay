@@ -1,0 +1,104 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: shellcheck (entrypoint.sh / tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+      - name: Run shellcheck
+        run: shellcheck entrypoint.sh tests/acceptance.sh
+
+  powershell-lint:
+    name: PSScriptAnalyzer (start-relay.ps1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+      - name: Lint start-relay.ps1
+        shell: pwsh
+        run: |
+          $findings = Invoke-ScriptAnalyzer -Path ./start-relay.ps1 -Severity Warning,Error
+          if ($findings) {
+            $findings | Format-Table -AutoSize | Out-String | Write-Host
+            throw "PSScriptAnalyzer 报告了 $($findings.Count) 个问题"
+          }
+          Write-Host "PSScriptAnalyzer: 无问题"
+
+  docker-build:
+    name: docker build + 规则冒烟测试
+    runs-on: ubuntu-latest
+    needs: [shellcheck]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg KALI_BASE_TAG=${{ vars.KALI_BASE_TAG || 'latest' }} \
+            -t kali-relay:ci .
+
+      - name: entrypoint 必须拒绝非法 TARGET_IP
+        run: |
+          set +e
+          out=$(docker run --rm -e TARGET_IP=not-an-ip kali-relay:ci 2>&1)
+          code=$?
+          echo "$out"
+          if [ "$code" -eq 0 ]; then
+            echo "::error::非法 TARGET_IP 未被拒绝"
+            exit 1
+          fi
+
+      - name: 启动容器并检查 iptables 规则
+        run: |
+          docker network create kali-relay-ci-net
+          docker run -d --name kali-ci \
+            --network kali-relay-ci-net \
+            --cap-add NET_ADMIN --cap-add NET_RAW \
+            --sysctl net.ipv4.conf.all.route_localnet=1 \
+            --sysctl net.ipv4.conf.default.route_localnet=1 \
+            -e TARGET_IP=198.51.100.10 \
+            kali-relay:ci
+
+          for i in $(seq 1 30); do
+            if docker exec kali-ci iptables -t nat -S KALI-RELAY >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+
+          echo "--- nat ---"
+          docker exec kali-ci iptables -t nat -S
+          docker exec kali-ci iptables -t nat -S KALI-RELAY | grep -q 'to:198.51.100.10'
+          docker exec kali-ci iptables -t nat -S KALI-RELAY | grep -q '127.0.0.11'
+          echo "规则校验通过"
+
+          docker exec kali-ci test "$(cat /proc/sys/net/ipv4/conf/all/route_localnet)" = "1"
+
+      - name: 未发布端口 / 非 host 网络
+        run: |
+          if [ -n "$(docker port kali-ci)" ]; then
+            echo "::error::容器发布了端口，违反设计约束"
+            exit 1
+          fi
+          docker inspect -f '{{.HostConfig.NetworkMode}}' kali-ci | grep -qx 'kali-relay-ci-net'
+          echo "隔离约束校验通过"
+
+      - name: 清理
+        if: always()
+        run: |
+          docker rm -f kali-ci || true
+          docker network rm kali-relay-ci-net || true
