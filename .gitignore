@@ -1,0 +1,53 @@
+# ---- 本地配置与密钥（绝不提交）----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# ---- 日志与运行产物 ----
+*.log
+logs/
+relay.log
+tmp/
+out/
+dist/
+build/
+
+# ---- 本地测试数据 ----
+testdata/
+.local/
+*.local.*
+acceptance-output/
+relay-test-report-*.json
+
+# ---- 编辑器 / IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*.user
+*.suo
+*.code-workspace
+.directory
+
+# ---- 操作系统杂项 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ---- 语言运行时缓存 ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+.pytest_cache/
+
+# ---- 本任务的本地需求草稿（不属于项目内容）----
+/方案.txt

@@ -1,0 +1,17 @@
+# 统一换行符，避免 shell 脚本在容器里因 CRLF 报 "no such file or directory"
+* text=auto
+
+*.sh    text eol=lf
+*.ps1   text eol=crlf
+*.psm1  text eol=crlf
+*.psd1  text eol=crlf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+Dockerfile text eol=lf
+*.md    text eol=lf
+
+# 二进制
+*.png binary
+*.jpg binary
+*.gif binary
+*.zip binary

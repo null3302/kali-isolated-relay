@@ -1,0 +1,36 @@
+# 构建上下文只需要 Dockerfile + entrypoint.sh
+.git
+.gitignore
+.gitattributes
+.github
+.vscode
+.idea
+
+# 文档与仓库元数据
+*.md
+LICENSE
+CHANGELOG.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+
+# 测试与脚本（容器内不需要）
+tests
+scripts
+
+# 本地配置、日志、临时文件
+.env
+.env.*
+*.log
+logs
+tmp
+out
+testdata
+.local
+
+# 操作系统杂项
+.DS_Store
+Thumbs.db
+
+# 本地需求草稿
+方案.txt
