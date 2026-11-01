@@ -388,7 +388,7 @@ $ pwsh ./scripts/privacy-scan.ps1
 | Windows + Docker Desktop 的原生路径 | 本机未安装 Docker Desktop，脚本用"Windows docker CLI 连接远端 daemon"与"WSL2 内原生 docker CLI"两种方式验证；容器行为与 Desktop 的 Linux 虚拟机一致 |
 | 桌面 Windows 的 `docker exec -it` 交互体验 | 非交互环境下脚本自动降级为 `-i`；真交互终端下的 `-it` 属标准 Docker 行为，未在本环境人工验证 |
 | 公网真实远端主机 | 本机对部分公网域名/端口受限，改用固定网段内的靶机容器，保证结论可重复 |
-| GitHub Actions | `ci.yml` 未实际触发（本环境无 GitHub 访问），仅做语法/结构校验 |
+| GitHub Actions | 已在 GitHub 上实际运行：`shellcheck`、`PSScriptAnalyzer`、`docker build + 规则冒烟测试` 三个 job 全部通过（run `41276659849`）。首次推送时 CI 暴露了三个真实问题并已修复，见第 12 节。 |
 
 ## 11. 复现方式
 
@@ -402,3 +402,15 @@ bash tests/acceptance.sh --fixture
 # 3) 隐私扫描
 pwsh ./scripts/privacy-scan.ps1
 ```
+
+## 12. CI 首次运行发现并修复的问题
+
+`ci.yml` 第一次在 GitHub 上跑就红了，暴露了三个真实问题（全部已修复，最后 run `41276659849` 全绿）：
+
+| 问题 | 现象 | 根因 | 修复 |
+| --- | --- | --- | --- |
+| shellcheck 失败 | CI 用默认严重度（含 info），本地只用过 `-S warning` | `tests/acceptance.sh` 里有未使用函数、多处 `A && B \|\| C`、trap 调用的 `cleanup` 被判为未使用 | 删除死代码；`A && B \|\| C` 全部改为显式 `if/else`；对 `cleanup` 加 `SC2329` 注释（`0fa723a`） |
+| DNAT 断言失败 | 冒烟测试报"规则不对" | `iptables -S` 输出的是长选项 `--to-destination`，而 `iptables-save` 才输出 `to:`；断言照抄了后者 | 改用 `--to-destination <IP>` 匹配（`bfd90d5`） |
+| `route_localnet` 断言失败 | 规则明明正确却仍 exit 1 | `docker exec ... test "$(cat /proc/...)"` 中的 `$(...)` 在 **runner 主机**上展开，读到的是宿主的值 | 改为在容器内执行：`docker exec kali-relay sh -c 'test "$(cat ...)" = "1"'`（`1d1d8d1`） |
+
+这三次失败也是"实测优先"的副产品：如果只写不跑，`ci.yml` 会一直红着。
