@@ -79,11 +79,18 @@ jobs:
             if docker exec kali-ci iptables -t nat -S KALI-RELAY >/dev/null 2>&1; then break; fi
             sleep 1
           done
+          if ! docker exec kali-ci iptables -t nat -S KALI-RELAY >/dev/null 2>&1; then
+            echo "::error::30s 内规则链未就绪"
+            docker logs kali-ci
+            exit 1
+          fi
 
           echo "--- nat ---"
           docker exec kali-ci iptables -t nat -S
-          docker exec kali-ci iptables -t nat -S KALI-RELAY | grep -q 'to:198.51.100.10'
+          # 注意：iptables -S 打印的是长选项 --to-destination，而不是 iptables-save 的 to:
+          docker exec kali-ci iptables -t nat -S KALI-RELAY | grep -q -- '--to-destination 198.51.100.10'
           docker exec kali-ci iptables -t nat -S KALI-RELAY | grep -q '127.0.0.11'
+          docker exec kali-ci iptables -t nat -S KALI-RELAY-POST | grep -q -- 'MASQUERADE'
           echo "规则校验通过"
 
           docker exec kali-ci test "$(cat /proc/sys/net/ipv4/conf/all/route_localnet)" = "1"
